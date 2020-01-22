@@ -20,8 +20,10 @@ import (
 	"fmt"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	// "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/klog"
 )
@@ -404,7 +406,9 @@ var batchResourceHandler resourceActionFunc = func(resController *ClusterWatcher
 		}
 		// find all ancestors
 		findAllApplicationsForResource(resController, obj, applications)
-
+		if resInfo.kind == DEPLOYMENT {
+			resController.createActionConfigMap(resInfo)
+		}
 		nonApplications[resInfo.key()] = resInfo
 
 	}
@@ -418,6 +422,171 @@ var batchResourceHandler resourceActionFunc = func(resController *ClusterWatcher
 	resController.resourceChannel.send(&resourceToBatch)
 	return nil
 }
+
+// if deployment.liberty && metadata.ownerReferences.kind == OpenLibertyApplication
+//    create configmap
+//      for each annotation
+// 	   add cmd-action
+// 	   add input
+//        for each parm
+// 		  // spec.validation.openAPIV3Schema.properties.spec.properties
+// 		  //                                                .required
+// 		  add field
+// createActionConfigMap creates an action configmap from a componentKind's CRD
+func (resController *ClusterWatcher) createActionConfigMap(resInfo *resourceInfo) {
+	if klog.V(2) {
+		klog.Infof("createActionConfigMap entry %v", resInfo)
+	}
+	tmp, ok := resInfo.metadata["ownerReferences"]
+	if ok {
+		if klog.V(2) {
+			klog.Infof("createActionConfigMap Deployment %s has ownerReferences", resInfo.name)
+		}
+		ownerReferences := tmp.([]interface{})
+		for _, ownerRef := range ownerReferences {
+			var ownerRefMap = ownerRef.(map[string]interface{})
+			kind, ok := ownerRefMap[KIND].(string)
+			if ok {
+				if klog.V(2) {
+					klog.Infof("createActionConfigMap Deployment %s has ownerReference kind: %s", resInfo.name, kind)
+				}
+				if kind == "OpenLibertyApplication" {
+					var objectMeta = metav1.ObjectMeta{
+						Name:      "kappnav.actions.deployment-liberty." + resInfo.name,
+						Namespace: resInfo.namespace,
+					}
+					// // Set owner of ConfigMap the same as the owner of the Deployment
+					// var ownerRefs = []metav1.OwnerReference{
+					// 	metav1.OwnerReference{
+					// 		APIVersion:         ownerRefMap["apiVersion"].(string),
+					// 		Kind:               ownerRefMap["kind"].(string),
+					// 		Name:               ownerRefMap["name"].(string),
+					// 		UID:                ownerRefMap["uid"].(types.UID),
+					// 		Controller:         ownerRefMap["controller"].(*bool),
+					// 		BlockOwnerDeletion: ownerRefMap["blockOwnerDeletion"].(*bool),
+					// 	},
+					// }
+					// objectMeta.SetOwnerReferences(ownerRefs)
+					configMap := &corev1.ConfigMap{
+						ObjectMeta: objectMeta,
+						// ObjectMeta: metav1.ObjectMeta{
+						// 	Name:            "kappnav.actions.deployment-liberty." + resInfo.name,
+						// 	Namespace:       resInfo.namespace,
+						// 	OwnerReferences: ownerReferences,
+						// },
+						Data: map[string]string{"cmd-actions": getCmdActionsJSON(resInfo), "inputs": libertyD2opInputs},
+					}
+					if klog.V(2) {
+						klog.Infof("createActionConfigMap configMap %v", configMap)
+					}
+					cfgmap, err := kubeClient.CoreV1().ConfigMaps(resInfo.namespace).Create(configMap)
+					if err != nil {
+						klog.Infof("createActionConfigMap Error creating action ConfigMap: %s.\n", err)
+					} else if klog.V(2) {
+						klog.Infof("createActionConfigMap created action ConfigMap: %v\n", cfgmap)
+					}
+					break
+				}
+			}
+		}
+	}
+	//
+	//
+	//
+	//
+	// if action config map doesn't exist already
+	// jobsClient := kubeClient.BatchV1().Jobs(getkAppNavNamespace())
+
+	// seconds100 := int32(100)
+
+	// job := &batchv1.Job{
+	// 	ObjectMeta: metav1.ObjectMeta{
+	// 		Name:      "kappnav-dynamic",
+	// 		Namespace: getkAppNavNamespace(),
+	// 	},
+	// 	Spec: batchv1.JobSpec{
+	// 		TTLSecondsAfterFinished: &seconds100,
+	// 		Template: apiv1.PodTemplateSpec{
+	// 			Spec: apiv1.PodSpec{
+	// 				Containers: []apiv1.Container{
+	// 					{
+	// 						Name:            "kappnav-dynamic",
+	// 						Image:           os.Getenv("KAPPNAV_INIT_IMAGE"),
+	// 						Command:         []string{"/initfiles/OKDConsoleIntegration.sh"},
+	// 						ImagePullPolicy: apiv1.PullPolicy(apiv1.PullAlways),
+	// 						Env:             []apiv1.EnvVar{{Name: "KUBE_ENV", Value: "okd"}},
+	// 					},
+	// 				},
+	// 				RestartPolicy: apiv1.RestartPolicyNever,
+	// 			},
+	// 		},
+	// 	},
+	// }
+
+	// result, err := jobsClient.Create(job)
+	// if err != nil {
+	// 	klog.Infof("Error Creating console integration update job: %s.\n", err)
+	// } else {
+	// 	klog.Infof("Created console integration update job: %s.\n", result)
+	// }
+
+	// if _, err := kubeClient.CoreV1().ConfigMaps("bob").Update(configMap); err != nil {
+	// 	// handle error
+	// }
+
+	// if err := kubeClient.CoreV1().ConfigMaps("bob").Delete("my-configmap", &metav1.DeleteOptions{}); err != nil {
+	// 	// handle error
+	// }
+}
+
+func getCmdActionsJSON(resInfo *resourceInfo) string {
+
+	return "    [\n" +
+		"      {\n" +
+		"        \"name\": \"getLibertyDump\",\n" +
+		"        \"text\": \"Get Liberty Dump\",\n" +
+		"        \"description\": \"Get Liberty dump.\",\n" +
+		"        \"image\": \"docker.io/pwbennet/app-nav-cmds:latest\",\n" +
+		"        \"cmd-pattern\": \"sh liberty-d2ops.sh dump ${input.dump-pod-name} " + resInfo.namespace + " ${input.dump-type}\",\n" +
+		"        \"requires-input\": \"liberty-dump-parms\"\n" +
+		"      },\n" +
+		"      {\n" +
+		"        \"name\": \"getLibertyTrace\",\n" +
+		"        \"text\": \"Get Liberty Trace\",\n" +
+		"        \"description\": \"Get Liberty trace.\",\n" +
+		"        \"image\": \"docker.io/pwbennet/app-nav-cmds:latest\",\n" +
+		"        \"cmd-pattern\": \"sh liberty-d2ops.sh trace ${input.trace-pod-name} " + resInfo.namespace + " ${input.trace-spec} ${input.trace-max-file-size} ${input.trace-max-files} ${input.trace-disable}\",\n" +
+		"        \"requires-input\": \"liberty-trace-parms\"\n" +
+		"      }\n" +
+		"    ]"
+}
+
+var libertyD2opInputs = "    {\n" +
+	"      \"liberty-dump-parms\": {\n" +
+	"          \"title\": \"Liberty Dump Parameters\",\n" +
+	"          \"fields\": {\n" +
+	"              \"dump-pod-name\":\n" +
+	"                  { \"label\": \"Pod Name\", \"type\" : \"string\", \"size\":\"large\", \"description\": \"Name of Liberty pod\", \"default\": \"\", \"optional\":false },\n" +
+	"              \"dump-type\":\n" +
+	"                  { \"label\": \"Dump Type: heap, thread, system\", \"type\" : \"list\", \"size\": \"medium\", \"values\": [ \"heap\", \"system\", \"thread\" ], \"description\": \"Type of Dump\", \"default\": \"heap\", \"optional\":false }\n" +
+	"          }\n" +
+	"      },\n" +
+	"      \"liberty-trace-parms\": {\n" +
+	"          \"title\": \"Liberty Trace Parameters\",\n" +
+	"          \"fields\": {\n" +
+	"              \"trace-pod-name\":\n" +
+	"                  { \"label\": \"Pod Name\", \"type\" : \"string\", \"size\":\"large\", \"description\": \"Name of Liberty pod\", \"default\": \"\", \"optional\":false },\n" +
+	"              \"trace-spec\":\n" +
+	"                  { \"label\": \"Trace Specification\", \"type\" : \"string\", \"size\":\"large\", \"description\": \"Trace Specification\", \"default\": \"*=info\", \"optional\":true },\n" +
+	"              \"trace-max-file-size\":\n" +
+	"                  { \"label\": \"Maximum trace file size in megabytes\", \"type\" : \"string\", \"description\": \"Maximum trace file size in megabytes\", \"default\": \"\", \"optional\":true },\n" +
+	"              \"trace-max-files\":\n" +
+	"                  { \"label\": \"Maximum number of trace files\", \"type\" : \"string\", \"size\":\"large\", \"description\": \"Maximum number of trace files\", \"default\": \"\", \"optional\":true },\n" +
+	"              \"trace-disable\":\n" +
+	"                  { \"label\": \"Disable Trace\", \"type\" : \"string\", \"size\":\"large\", \"description\": \"Disable trace\", \"default\": \"false\", \"optional\":true }\n" +
+	"          }\n" +
+	"      }\n" +
+	"    }"
 
 // Start watching component kinds of the application. Also put
 // application on batch of applications to recalculate status
