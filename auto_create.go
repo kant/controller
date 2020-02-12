@@ -61,9 +61,9 @@ const (
 var defaultKinds = []groupKind{
 	groupKind{group: "apps", kind: "Deployment"},
 	groupKind{group: "apps", kind: "StatefulSet"},
-	groupKind{group: "core", kind: "Service"},
+	groupKind{group: "", kind: "Service"},
 	groupKind{group: "extensions", kind: "Ingress"},
-	groupKind{group: "core", kind: "ConfigMap"}}
+	groupKind{group: "", kind: "ConfigMap"}}
 
 /* information about resource from which to auto-create applications */
 type autoCreateResourceInfo struct {
@@ -252,22 +252,14 @@ func (resController *ClusterWatcher) parseAutoCreateResourceInfo(unstructuredObj
 						kind = val
 						gvr, ok = resController.getWatchGVRForKind(kind)
 						if ok {
-							if gvr.Group == "" {
-								group = "core"
-							} else {
-								group = gvr.Group
-							}
+							group = gvr.Group
 							if klog.V(4) {
 								klog.Infof("parseAutoCreateResourceInfo using group: %s from watch GVR for kind: %s", group, kind)
 							}
 						} else {
 							gvr, ok = coreKindToGVR[val]
 							if ok {
-								if gvr.Group == "" {
-									group = "core"
-								} else {
-									group = gvr.Group
-								}
+								group = gvr.Group
 								if klog.V(4) {
 									klog.Infof("parseAutoCreateResourceInfo using group: #s from default GVR for core kind: %s, using default group: App", val)
 								}

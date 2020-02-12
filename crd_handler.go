@@ -33,7 +33,7 @@ var CRDNewHandler resourceActionFunc = func(resController *ClusterWatcher, rw *R
 	}
 	if !exists {
 		// a CRD has been deleted
-		
+
 		if klog.V(4) {
 			klog.Infof("CRDNewHandler a CRD has been deleted")
 		}
@@ -53,8 +53,6 @@ var CRDNewHandler resourceActionFunc = func(resController *ClusterWatcher, rw *R
 				resController.AddToWatch(coreApplicationGVR)
 				resController.AddToWatch(coreDeploymentGVR)
 				resController.AddToWatch(coreStatefulSetGVR)
-				resController.AddToWatch(coreDeploymentConfigGVR)
-				//resController.AddToWatch(KAppNav)
 				err = deleteOrphanedAutoCreatedApplications(resController)
 				if err != nil {
 					klog.Errorf("Error deleting orphaned applications: %s", err)

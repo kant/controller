@@ -27,7 +27,7 @@
                 "kind": "Deployment"
             },
             {
-                "group": "core",
+                "group": "",
                 "kind": "Service"
             }
         ],

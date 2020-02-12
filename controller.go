@@ -152,11 +152,6 @@ var (
 		Version:  "v1",
 		Resource: "deployments",
 	}
-	coreDeploymentConfigGVR = schema.GroupVersionResource{
-		Group:    "apps.openshift.io",
-		Version:  "v1",
-		Resource: "deploymentconfigs",
-	}
 	coreConfigMapGVR = schema.GroupVersionResource{
 		Group:    "",
 		Version:  "v1",
@@ -258,7 +253,6 @@ func init() {
 	coreKindToGVR = make(map[string]schema.GroupVersionResource)
 	coreKindToGVR["Service"] = coreServiceGVR
 	coreKindToGVR["Deployment"] = coreDeploymentGVR
-	coreKindToGVR["DeploymentConfig"] = coreDeploymentConfigGVR
 	coreKindToGVR["Route"] = coreRouteGVR
 	coreKindToGVR["ConfigMap"] = coreConfigMapGVR
 	coreKindToGVR["Secret"] = coreSecretGVR
@@ -636,13 +630,10 @@ func (resController *ClusterWatcher) getWatchGVR(gvr schema.GroupVersionResource
 }
 
 // getGVRForGroupKind gets the GVR for a kind and group
-func (resController *ClusterWatcher) getGVRForGroupKind(inGroup string, kind string) (schema.GroupVersionResource, bool) {
+func (resController *ClusterWatcher) getGVRForGroupKind(group string, kind string) (schema.GroupVersionResource, bool) {
 
 	// map group/kind to apiVersion
-	var group string
-	if inGroup == "core" {
-		group = ""
-	}
+
 	groupKind := group + "/" + kind
 	if klog.V(2) {
 		klog.Infof("getGVRForGroupKind trying group/Kind: %s", groupKind)
@@ -650,7 +641,7 @@ func (resController *ClusterWatcher) getGVRForGroupKind(inGroup string, kind str
 	gvr, ok := resController.groupKindToGVR.Load(groupKind)
 	if ok {
 		if klog.V(2) {
-			klog.Infof("getGVRForGroupKind for group: %s kind: %s returning: %v", inGroup, kind, gvr.(schema.GroupVersionResource))
+			klog.Infof("getGVRForGroupKind for group: %s kind: %s returning: %v", group, kind, gvr.(schema.GroupVersionResource))
 		}
 		return gvr.(schema.GroupVersionResource), true
 	}
@@ -662,12 +653,12 @@ func (resController *ClusterWatcher) getGVRForGroupKind(inGroup string, kind str
 	gvr, ok = coreKindToGVR[kind]
 	if ok {
 		if klog.V(2) {
-			klog.Infof("getGVRForGroupKind returning default GVR for group: %s kind: %s GVR: %v", inGroup, kind, gvr.(schema.GroupVersionResource))
+			klog.Infof("getGVRForGroupKind returning default GVR for group: %s kind: %s GVR: %v", group, kind, gvr.(schema.GroupVersionResource))
 		}
 		return gvr.(schema.GroupVersionResource), true
 	}
 	if klog.V(2) {
-		klog.Infof("getGVRForGroupKind no CRD found for group: %s kind: %s, returning false", inGroup, kind)
+		klog.Infof("getGVRForGroupKind no CRD found for group: %s kind: %s, returning false", group, kind)
 	}
 	return schema.GroupVersionResource{}, false
 }
@@ -745,25 +736,25 @@ func (resController *ClusterWatcher) addResourceMapEntry(kind string, group stri
 		groupKind := group + "/" + kind
 		// don't replace an existing entry for a core GVR
 		store := true
-		gvr, ok := resController.groupKindToGVR.Load(groupKind)
+		gvr1, ok := resController.groupKindToGVR.Load(groupKind)
 		if ok {
 			coreGVR, ok := coreKindToGVR[kind]
-			if ok && coreGVR == gvr {
+			if ok && coreGVR == gvr1 {
 				if klog.V(2) {
-					klog.Infof("addResourceMapEntry not repacing group/Kind map core GVR: %s with GVR: %s", coreGVR, gvr)
+					klog.Infof("addResourceMapEntry not repacing group/Kind map core GVR: %s with GVR: %v", coreGVR, gvr1)
 				}
 				store = false
 			}
 		}
 		if store == true {
 			if klog.V(2) {
-				klog.Infof("addResourceMapEntry mapping group/Kind: %s to GVR: %s", groupKind, gvr)
+				klog.Infof("addResourceMapEntry mapping group/Kind: %s to GVR: %v", groupKind, gvr)
 			}
 			resController.groupKindToGVR.Store(groupKind, gvr)
 		}
 	}
 	if klog.V(2) {
-		klog.Infof("addResourceMapEntry mapping apiVersion/Kind: %s to GVR: %s", apiVersionKind, gvr)
+		klog.Infof("addResourceMapEntry mapping apiVersion/Kind: %s to GVR: %v", apiVersionKind, gvr)
 	}
 	resController.apiVersionKindToGVR.Store(apiVersionKind, gvr)
 	rw.Group = group
@@ -880,19 +871,14 @@ func (resController *ClusterWatcher) initResourceMap() error {
 	var groups = apiGroups.Groups
 	var group metav1.APIGroup
 	for _, group = range groups {
-		// Special case for kube 1.16 / OCP 4.3 which added apiextensions.k8s.io/v1
-		// so can't use only the preferred version.
-		// TODO: Probably should handle all versions of all resources, more test needed first
-		if group.Name == "apiextensions.k8s.io" {
-			for i := 0; i < len(group.Versions); i++ {
-				if klog.V(2) {
-					klog.Infof("initResourceMap processing apiextensions.k8s.io GroupVersion %s", group.Versions[i].GroupVersion)
-				}
-				resController.processResourceGroup(group.Versions[i].GroupVersion, discClient)
+
+		for i := 0; i < len(group.Versions); i++ {
+			if klog.V(2) {
+				klog.Infof("initResourceMap processing GroupVersion %s", group.Versions[i].GroupVersion)
 			}
-		} else {
-			resController.processResourceGroup(group.PreferredVersion.GroupVersion, discClient)
+			resController.processResourceGroup(group.Versions[i].GroupVersion, discClient)
 		}
+
 	}
 	if klog.V(2) {
 		klog.Infof("initResourceMap exit")

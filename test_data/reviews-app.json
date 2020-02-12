@@ -16,7 +16,7 @@
     "spec": {
         "componentKinds": [
             {
-                "group": "core",
+                "group": "",
                 "kind": "Service"
             },
             {
